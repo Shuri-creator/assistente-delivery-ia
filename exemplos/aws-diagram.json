@@ -1,0 +1,103 @@
+{
+  "Comment": "Assistente de Delivery Agêntico - Orquestração de Missão Crítica",
+  "StartAt": "CognitiveIntentExtraction",
+  "States": {
+    "CognitiveIntentExtraction": {
+      "Type": "Task",
+      "Resource": "arn:aws:states:::bedrock:invokeModel",
+      "Parameters": {
+        "ModelId": "anthropic.claude-3-haiku-20240307-v1:0",
+        "Body": {
+          "anthropic_version": "bedrock-2023-05-31",
+          "max_tokens": 500,
+          "messages": [
+            {
+              "role": "user",
+              "content": [
+                {
+                  "type": "text",
+                  "text.$": "$.user_input"
+                }
+              ]
+            }
+          ]
+        }
+      },
+      "ResultPath": "$.intent_payload",
+      "Next": "GroundingAndIntentValidation"
+    },
+    "GroundingAndIntentValidation": {
+      "Type": "Choice",
+      "Choices": [
+        {
+          "And": [
+            {
+              "Variable": "$.intent_payload.intent",
+              "StringEquals": "checkout"
+            },
+            {
+              "Variable": "$.intent_payload.grounding_check",
+              "BooleanEquals": true
+            }
+          ],
+          "Next": "ParallelDistributedTransaction"
+        }
+      ],
+      "Default": "RequestClarification"
+    },
+    "ParallelDistributedTransaction": {
+      "Type": "Parallel",
+      "Branches": [
+        {
+          "StartAt": "ReserveInventory",
+          "States": {
+            "ReserveInventory": {
+              "Type": "Task",
+              "Resource": "arn:aws:lambda:region:account:function:InventoryWorker",
+              "End": true
+            }
+          }
+        },
+        {
+          "StartAt": "ChargePayment",
+          "States": {
+            "ChargePayment": {
+              "Type": "Task",
+              "Resource": "arn:aws:lambda:region:account:function:PaymentWorker",
+              "End": true
+            }
+          }
+        }
+      ],
+      "Catch": [
+        {
+          "ErrorEquals": [
+            "States.ALL"
+          ],
+          "Next": "SagaCompensatoryAction"
+        }
+      ],
+      "Next": "FinalizeOrder"
+    },
+    "SagaCompensatoryAction": {
+      "Type": "Task",
+      "Resource": "arn:aws:lambda:region:account:function:InventoryReversal",
+      "Next": "ExecutionFailed"
+    },
+    "FinalizeOrder": {
+      "Type": "Task",
+      "Resource": "arn:aws:lambda:region:account:function:StatusUpdater",
+      "End": true
+    },
+    "RequestClarification": {
+      "Type": "Task",
+      "Resource": "arn:aws:lambda:region:account:function:AgentClarifier",
+      "End": true
+    },
+    "ExecutionFailed": {
+      "Type": "Fail",
+      "Error": "SagaRollbackTriggered",
+      "Cause": "Transação distribuída falhou. Ações compensatórias executadas para manter consistência eventual."
+    }
+  }
+}
