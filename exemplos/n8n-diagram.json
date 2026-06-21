@@ -1,0 +1,194 @@
+{
+  "comment": "Assistente de Delivery Agêntico - Versão Alternativa Open Source (n8n + Ollama)",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "delivery-order-webhook",
+        "options": {}
+      },
+      "name": "Intake Webhook",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 1,
+      "position": [
+        100,
+        250
+      ]
+    },
+    {
+      "parameters": {
+        "options": {
+          "systemMessage": "Você é o orquestrador cognitivo para um delivery agêntico. Use o menu oficial fornecido via RAG para validar itens. Extraia intenção e entidades rigorosamente em JSON."
+        }
+      },
+      "name": "AI Agent (Cognition)",
+      "type": "@n8n/n8n-nodes-langchain.agent",
+      "typeVersion": 1.6,
+      "position": [
+        350,
+        250
+      ]
+    },
+    {
+      "parameters": {
+        "model": "llama3:latest",
+        "options": {
+          "temperature": 0.2
+        }
+      },
+      "name": "Ollama (Llama 3)",
+      "type": "@n8n/n8n-nodes-langchain.lmChatOllama",
+      "typeVersion": 1,
+      "position": [
+        350,
+        450
+      ],
+      "note": "Motor de IA alternativo ao Amazon Bedrock"
+    },
+    {
+      "parameters": {
+        "mode": "expression",
+        "expression": "={{ $node[\"AI Agent (Cognition)\"].json[\"grounding_check\"] }}",
+        "rules": {
+          "rules": [
+            {
+              "value2": "true"
+            }
+          ]
+        }
+      },
+      "name": "Switch: Grounding Check",
+      "type": "n8n-nodes-base.switch",
+      "typeVersion": 1,
+      "position": [
+        600,
+        250
+      ],
+      "note": "Estado Choice determinístico via n8n"
+    },
+    {
+      "parameters": {
+        "url": "http://inventory-worker/reserve",
+        "method": "POST",
+        "sendBody": true,
+        "bodyParameters": {
+          "parameters": [
+            {
+              "name": "items",
+              "value": "={{ $node[\"AI Agent (Cognition)\"].json[\"entities\"][\"items\"] }}"
+            }
+          ]
+        }
+      },
+      "name": "HTTP: Reserve Inventory",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.1,
+      "position": [
+        850,
+        150
+      ],
+      "note": "Execução de transação local via microserviço"
+    },
+    {
+      "parameters": {
+        "url": "http://payment-gateway/process",
+        "method": "POST",
+        "sendBody": true
+      },
+      "name": "HTTP: Charge Payment",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.1,
+      "position": [
+        850,
+        350
+      ]
+    },
+    {
+      "parameters": {
+        "url": "http://inventory-worker/compensate",
+        "method": "POST"
+      },
+      "name": "Saga: Compensatory Action",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.1,
+      "position": [
+        1100,
+        250
+      ],
+      "note": "Implementação do Saga Pattern para reversão de estoque"
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "SELECT * FROM menu WHERE items @> $1",
+        "parameters": "={{ $node[\"AI Agent (Cognition)\"].json[\"entities\"][\"items\"] }}"
+      },
+      "name": "PostgreSQL (pgvector RAG)",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.3,
+      "position": [
+        150,
+        450
+      ],
+      "note": "Base de conhecimento local para grounding agêntico"
+    }
+  ],
+  "connections": {
+    "Intake Webhook": {
+      "main": [
+        [
+          {
+            "node": "AI Agent (Cognition)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Ollama (Llama 3)": {
+      "ai_language_model": [
+        [
+          {
+            "node": "AI Agent (Cognition)",
+            "type": "ai_language_model",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "AI Agent (Cognition)": {
+      "main": [
+        [
+          {
+            "node": "Switch: Grounding Check",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Switch: Grounding Check": {
+      "main": [
+        [
+          {
+            "node": "HTTP: Reserve Inventory",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "HTTP: Charge Payment",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "metadata": {
+    "framework": "RTCCF_4F2Z",
+    "architecture_type": "Serverless Agentic (Alternative)",
+    "orchestrator": "n8n (OpenSource)"
+  }
+}
